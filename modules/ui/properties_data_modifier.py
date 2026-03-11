@@ -1208,68 +1208,75 @@ class DATA_PT_modifiers:
     def SUBSURF(self, layout, ob, md):
         from bpy import context
         layout.row().prop(md, "subdivision_type", expand=True)
-
         split = layout.split()
         col = split.column()
-
         scene = context.scene
-        engine = context.engine
-        show_adaptive_options = (
+        engine = context.engine         
+        if bpy.app.version >= (5, 0, 0):
+            show_adaptive_options = (
             engine == 'CYCLES' and md == ob.modifiers[-1]
-            and scene.cycles.feature_set == 'EXPERIMENTAL' and md.use_limit_surface
-        )
-
-        if show_adaptive_options:
-            col.label(text="Render:")
-            col.prop(ob.cycles, "use_adaptive_subdivision", text="Adaptive")
-            if ob.cycles.use_adaptive_subdivision:
-                col.prop(ob.cycles, "dicing_rate")
-            else:
-                col.prop(md, "render_levels", text="Levels")
-
-            col.separator()
-
-            col.label(text="Viewport:")
-            col.prop(md, "levels", text="Levels")
-
-            col.separator()
+            )
+            use_adaptive = md.use_adaptive_subdivision
         else:
-            col.label(text="Subdivisions:")
-            sub = col.column(align=True)
-            sub.prop(md, "render_levels", text="Render")
-            sub.prop(md, "levels", text="Viewport")
+            show_adaptive_options = (
+            engine == 'CYCLES' and md == ob.modifiers[-1]
+            and scene.cycles.feature_set == 'EXPERIMENTAL'
+            )
+            use_adaptive = ob.cycles.use_adaptive_subdivision            
 
+        col.label(text="Subdivisions:")
+        sub = col.column(align=True)
+        sub.prop(md, "levels", text="Viewport")
+        sub = col.column(align=True)
+        sub.active = (not show_adaptive_options) or (not use_adaptive)
+        sub.prop(md, "render_levels", text="Render")
         sub = col.column()
-        sub.active = (not show_adaptive_options) or (not ob.cycles.use_adaptive_subdivision)
         sub.prop(md, "quality")
-
+        sub.active = (md.use_limit_surface)
+        col.separator()    
+        if show_adaptive_options:
+            if bpy.app.version >= (5, 0, 0):
+                col.prop(md, "use_adaptive_subdivision", text="Adaptive Subdivision")
+            else:
+                col.prop(ob.cycles, "use_adaptive_subdivision", text="Adaptive")
+                if ob.cycles.use_adaptive_subdivision:
+                    col.prop(ob.cycles, "dicing_rate")
+        if show_adaptive_options and use_adaptive:
+            if bpy.app.version >= (5, 0, 0):
+                col.prop(md, "adaptive_space", text="Space")
+                sub = col.column()
+                col.scale_y = 1
+                if md.adaptive_space == 'PIXEL':
+                    col.prop(md, "adaptive_pixel_size", text="Target Pixel Size")
+                    render = max(scene.cycles.dicing_rate * md.adaptive_pixel_size, 0.1)
+                    preview = max(scene.cycles.preview_dicing_rate * md.adaptive_pixel_size, 0.1)
+                    col.label(text=f"Render {render:.2f} px, Viewport {preview:.2f} px")                
+                else:                                               
+                    col.prop(md, "adaptive_object_edge_length", text="Target Edge Length")
+                    render = max(scene.cycles.dicing_rate * md.adaptive_object_edge_length, 0.1)
+                    preview = max(scene.cycles.preview_dicing_rate * md.adaptive_object_edge_length, 0.1)
+                    col.label(text=f"Render {render:.3f} , Viewport {preview:.3f} ")           
+                col.separator()  
+            else:            
+                col.scale_y = 1
+                col.label(text="Final Dicing Rate:")
+                render = max(scene.cycles.dicing_rate * ob.cycles.dicing_rate, 0.1)
+                preview = max(scene.cycles.preview_dicing_rate * ob.cycles.dicing_rate, 0.1)
+                col.label(text=f"Render {render:.2f} px, Preview {preview:.2f} px")    
+     
         col = split.column()
 
         sub = col.column()
-        sub.active = (not show_adaptive_options) or (not ob.cycles.use_adaptive_subdivision)
         sub.label(text="UV Smooth:")
         sub.prop(md, "uv_smooth", text="")
         sub.label(text="Boundary Smooth:")
         sub.prop(md, "boundary_smooth", text="")
-
-        col.prop(md, "show_only_control_edges")
-
+        col.separator()
         sub = col.column()
-        sub.active = (not show_adaptive_options) or (not ob.cycles.use_adaptive_subdivision)
+        sub.prop(md, "show_only_control_edges")
         sub.prop(md, "use_limit_surface")
         sub.prop(md, "use_creases")
         sub.prop(md, "use_custom_normals")
-
-        if show_adaptive_options and ob.cycles.use_adaptive_subdivision:
-            col = layout.column(align=True)
-            col.scale_y = 0.6
-            col.separator()
-            col.label(text="Final Dicing Rate:")
-            col.separator()
-
-            render = max(scene.cycles.dicing_rate * ob.cycles.dicing_rate, 0.1)
-            preview = max(scene.cycles.preview_dicing_rate * ob.cycles.dicing_rate, 0.1)
-            col.label(text=f"Render {render:.2f} px, Preview {preview:.2f} px")
 
     def SURFACE(self, layout, _ob, _md):
         layout.label(text="Settings are inside the Physics tab")
