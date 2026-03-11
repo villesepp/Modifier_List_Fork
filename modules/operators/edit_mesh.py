@@ -634,7 +634,7 @@ class EditmeshModifier(bpy.types.Operator):
             ))
             
             # Assign the custom property to the object
-            setattr(obj, prop_name, backup_mesh_data)
+            obj[prop_name] = backup_mesh_data
 
             mod_is_visiable = []
 

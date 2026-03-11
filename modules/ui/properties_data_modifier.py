@@ -2049,12 +2049,12 @@ class DATA_PT_modifiers:
             return
 
         info_per_input = []
-
+        
         # Skip the last output because it's a placeholder.
         for node_output in input_node.outputs[:-1]:
             if node_output.type == 'GEOMETRY':
                 continue
-
+            
             info_per_input.append(
                 {
                     "name": node_output.name,
@@ -2063,11 +2063,23 @@ class DATA_PT_modifiers:
                 }
             )
 
+
         input_prop_ids = [prop_id for prop_id in md.keys()
                           if (prop_id[-1].isdigit())]
 
         for i, prop_id in enumerate(input_prop_ids[:len(info_per_input)]):
             info_per_input[i]["prop_id"] = prop_id
+
+        def get_inputs_is_input_used(node_tree):
+            inputs_is_input_used = [md.is_input_used(prop_id) for prop_id in input_prop_ids
+                        if prop_id[-1].isdigit()]
+                        
+            for i, is_used in enumerate(inputs_is_input_used):
+                if i < len(info_per_input):
+                    info_per_input[i]["is_input_used"] = is_used
+
+        if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: # new is_input_used function 
+            get_inputs_is_input_used(node_group)
 
         def get_inputs_hide_in_modifier(node_tree):
             inputs_hide_in_modifier = [item.hide_in_modifier for item in node_tree.interface.items_tree
@@ -2077,7 +2089,7 @@ class DATA_PT_modifiers:
                                        
             for i, hide_in_mod in enumerate(inputs_hide_in_modifier):
                 if i < len(info_per_input):
-                    info_per_input[i]["hide_in_modifier"] = hide_in_mod
+                    info_per_input[i]["hide_in_modifier"] = hide_in_mod 
                     
         def get_inputs_is_panel_toggle(node_tree):
             inputs_is_panel_toggle = [item.is_panel_toggle for item in node_tree.interface.items_tree
@@ -2112,9 +2124,16 @@ class DATA_PT_modifiers:
                     return
                     
                 split = layout.split(factor=split_facor)
-                split.label(text=input_info["name"] + ":")
+
+                name = input_info["name"]
+                split.label(text=name + ":")
 
                 row = split.row(align=True)
+
+                if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: # handle is_input_used
+                    if not input_info["is_input_used"]:
+                        row.active = False
+
                 prop_row = row.row(align=True)
 
                 if input_type in datablock_input_info_per_type.keys():
@@ -2178,36 +2197,63 @@ class DATA_PT_modifiers:
 
         if BLENDER_VERSION_MAJOR_POINT_MINOR > 4.0:
             for item in socket_panel_list:
+                socket_unused = False
                 if item == 'SOCKET':
                     current_item += 1
-   
+    
+                if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: # handle is_input_used
+                    if info_per_input:
+                        if info_per_input[0]:
+                            if "prop_id" in info_per_input[0]:
+                                visable = md.is_input_visible(info_per_input[0]["prop_id"])
+                                if not md.is_input_visible(info_per_input[0]["prop_id"]):
+                                    info_per_input.pop(0)
+                                    if item == 'PANEL': 
+                                        panel_id = (panel_id + 1) % amount_of_panels
+                                    continue
+
                 if item == 'SOCKET' and socket_has_panel_and_panel_name[current_item] == 'no_panel':
                     if info_per_input:
                         get_socket_prop_id(info_per_input.pop(0))
                         
                 elif item == 'PANEL':    
+                    # layout = layout.box()
                     header, panel = layout.panel(idname=str(all_panel_list[panel_id]), default_closed=is_panel_default_closed(node_group))
-                    header.label(text=all_panel_list[panel_id].name)
-                    panel_open = bool(panel)
+
+                    is_panel_toggle = False
+                    panel_name = all_panel_list[panel_id].name
                     if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.0: # new is_panel_toggle property
                         if info_per_input[0]["is_panel_toggle"]:
                             header.alignment = 'LEFT'
-                            header.prop(md, f'["{str(info_per_input[0]["prop_id"])}"]', text=str(info_per_input[0]["name"]))
-
+                            header.prop(md, f'["{str(info_per_input[0]["prop_id"])}"]', text="")
+                            is_panel_toggle = True
+                    header.label(text=panel_name)
+                    panel_open = bool(panel)
+                   
                     # if is_panel_toggle:
                     #     is_panel_toggle
+                    # upde mutli res and subdiv mod
                     
                     if panel_open:
                         num_sockets_in_panel = sum(1 for item in node_group.interface.items_tree if item.item_type == 'SOCKET' and item.parent == all_panel_list[panel_id])
                         for i in range(num_sockets_in_panel):
                             if info_per_input:
-                                get_socket_prop_id(info_per_input.pop(0))
+                                # if panel name in socket name, remove that part from the socket name to make it more clear like in deafult blender modifier panel
+                                if panel_name in info_per_input[0]["name"]:
+                                    info_per_input[0]["name"] = info_per_input[0]["name"].replace(panel_name, "").strip()
+
+                                # Skip the first socket if it's a panel toggle to avoid duplicates
+                                if i == 0 and is_panel_toggle:
+                                    info_per_input.pop(0)
+                                else:
+                                    get_socket_prop_id(info_per_input.pop(0))
                         removed_sockets.append(num_sockets_in_panel)
                     else:
                         num_sockets_in_panel = sum(1 for item in node_group.interface.items_tree if item.item_type == 'SOCKET' and item.parent == all_panel_list[panel_id])
                         info_per_input = info_per_input[num_sockets_in_panel:]
 
                     panel_id = (panel_id + 1) % amount_of_panels
+
         else:
             for item in socket_panel_list:
                 if info_per_input:
