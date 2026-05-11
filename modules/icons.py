@@ -12,6 +12,9 @@ def get_icons():
     """Returns the preview collection containing all icons."""
     return _preview_collections["main"]
 
+def get_icon_folder_path():
+    """Returns the path to the icons folder."""
+    return os.path.join(os.path.dirname(__file__), os.path.pardir, "icons")
 
 def load_icons():
     """Loads/reloads icons from the icons directory.
@@ -31,7 +34,7 @@ def load_icons():
     prefs = bpy.context.preferences.addons[base_package].preferences
     color = prefs.icon_color
 
-    icons_dir = os.path.join(os.path.dirname(__file__), os.path.pardir, "icons", color)
+    icons_dir = os.path.join(get_icon_folder_path(), color)
     icons_dir_files = os.listdir(icons_dir)
 
     all_icon_files = [icon for icon in icons_dir_files if icon.endswith(".png")]
@@ -39,8 +42,8 @@ def load_icons():
     all_icon_files_and_names = zip(all_icon_names, all_icon_files)
 
     for icon_name, icon_file in all_icon_files_and_names:
-        pcoll.load(icon_name, os.path.join(icons_dir, icon_file), 'IMAGE')
-
+        icon = pcoll.load(icon_name, os.path.join(icons_dir, icon_file), 'IMAGE')
+        hacky_icon_fix = str(icon.icon_pixels)
     _preview_collections["main"] = pcoll
 
 

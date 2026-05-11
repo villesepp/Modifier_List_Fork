@@ -32,7 +32,13 @@ from bpy.app.translations import pgettext_iface as iface_
 
 
 BLENDER_VERSION_MAJOR_POINT_MINOR = float(bpy.app.version_string[0:4].strip("."))
-
+def geomod_get_identifier(modifier, identifier_name): 
+    for item in modifier.node_group.interface.items_tree:
+        if item.identifier == identifier_name:
+            # print(f"Found identifier for {identifier_name}: {item}")
+            return item.identifier
+    # print("failed to get identifier for param: " + identifier_name)
+    return None
 
 class DATA_PT_modifiers:
 
@@ -2038,6 +2044,8 @@ class DATA_PT_modifiers:
         layout.prop(md, "adaptivity")
         layout.prop(md, "use_smooth_shade")
 
+    
+
     def _nodes_4_0_inputs(self, layout, ob, md, split_facor):
         node_group = md.node_group
 
@@ -2059,9 +2067,9 @@ class DATA_PT_modifiers:
         
         # Skip the last output because it's a placeholder.
         for node_output in input_node.outputs[:-1]:
-            if node_output.type == 'GEOMETRY':
+            if node_output.type in {'GEOMETRY', 'CLOSURE', 'BUNDLE', 'MATRIX'}: # not shown in UI, no supported props
                 continue
-            
+
             info_per_input.append(
                 {
                     "name": node_output.name,
@@ -2070,10 +2078,14 @@ class DATA_PT_modifiers:
                 }
             )
 
-
-        input_prop_ids = [prop_id for prop_id in md.keys()
-                          if (prop_id[-1].isdigit())]
-
+        if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: # new is_input_used function 
+            input_prop_ids = [prop_id for prop_id in md.properties.inputs.keys()]
+            # remove first prop since its palceholder
+            input_prop_ids = input_prop_ids[1:]
+        else:
+            input_prop_ids = [prop_id for prop_id in md.keys()
+                            if (prop_id[-1].isdigit())]
+            
         for i, prop_id in enumerate(input_prop_ids[:len(info_per_input)]):
             info_per_input[i]["prop_id"] = prop_id
 
@@ -2119,62 +2131,99 @@ class DATA_PT_modifiers:
             "OBJECT": {"data_collection": "objects", "icon": "OBJECT_DATA"},
             "TEXTURE": {"data_collection": "textures", "icon": "TEXTURE"},
         }
-        def get_socket_prop_id(input_info):
-                if 'type' in input_info and input_info['type'] == 'MATRIX':  # matrix sockets are not supported y in Blender and will be skipped, should be handeld better since currently it will hide one other input
-                    return
-                if "prop_id" not in input_info: # needed to avoid error when the next socket after matrix socket is skipped
-                    return
-                prop_id = input_info["prop_id"]
-                input_type = input_info["type"]
 
-                if input_info["hide_in_modifier"]:
-                    return
-                    
-                split = layout.split(factor=split_facor)
+        def get_socket_prop_id(input_info, panel=False):
+            # if 'type' in input_info and input_info['type'] == 'MATRIX':  # matrix sockets are not supported y in Blender and will be skipped, should be handeld better since currently it will hide one other input
+            #     return
+            if "prop_id" not in input_info: # needed to avoid error when the next socket after matrix socket is skipped
+                return
+            prop_id = input_info["prop_id"]
+            input_type = input_info["type"]
 
-                name = input_info["name"]
-                split.label(text=name + ":")
+            if input_info["hide_in_modifier"]:
+                return
+            
+            split = layout.split(factor=split_facor)
 
-                row = split.row(align=True)
+            name = input_info["name"]
+            if panel:
+                name = "             " + name # add spaces to make it look like it's part of the panel above it
+            split.label(text=name + ":")
 
-                if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: # handle is_input_used
-                    if not input_info["is_input_used"]:
-                        row.active = False
+            row = split.row(align=True)
 
-                prop_row = row.row(align=True)
+            if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: # handle is_input_used
+                if not input_info["is_input_used"]:
+                    row.active = False
 
-                if input_type in datablock_input_info_per_type.keys():
-                    datablock_input_info = datablock_input_info_per_type[input_type]
+            prop_row = row.row(align=True)
+
+            if input_type in datablock_input_info_per_type.keys():
+                datablock_input_info = datablock_input_info_per_type[input_type]
+                if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: 
+                    prop_row.prop_search(getattr(md.properties.inputs, geomod_get_identifier(md, prop_id)), "value", bpy.data,
+                                        datablock_input_info["data_collection"],
+                                        text="", icon=datablock_input_info["icon"])
+
+                    # if datablock_input_info["icon"] == "IMAGE":
+                    #     # if no image in prop, show new and open buttons
+                    #     if not getattr(md.properties.inputs, geomod_get_identifier(md, prop_id)).value:
+                    #         prop_row.operator("image.new", text="New", icon='ADD')
+                    #         prop_row.operator("image.open", text="Open", icon='FILE_FOLDER')
+                    #     else:
+                    #         prop_row.operator("image.use_fake_user", text="", icon='FAKE_USER_OFF')
+                    #         prop_row.operator("image.new", text="", icon='DUPLICATE')
+                    #         prop_row.operator("image.open", text="", icon='FILE_FOLDER')
+                    #         prop_row.operator("image.unlink", text="", icon='X')
+                        
+                else:
                     prop_row.prop_search(md, f'["{prop_id}"]', bpy.data,
                                         datablock_input_info["data_collection"],
                                         text="", icon=datablock_input_info["icon"])
-                    row.label(text="", icon='BLANK1')
+                row.label(text="", icon='BLANK1')
 
-                else:
-                    if input_info["accepts_attribute"] and input_info["type"] != 'MENU': # menus should never show the attribute buttons # fixes: https://github.com/Dangry98/Modifier_List_Fork/issues/44
-                        if md[f"{prop_id}_use_attribute"] == 1:
+            else:
+                if input_info["accepts_attribute"] and input_info["type"] != 'MENU': # menus should never show the attribute buttons # fixes: https://github.com/Dangry98/Modifier_List_Fork/issues/44
+                    if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: 
+                        use_attr = getattr(md.properties.inputs, geomod_get_identifier(md, prop_id)).type != "VALUE"                
+
+                    else:
+                        use_attr = md.get(f"{prop_id}_use_attribute", 0) == 1
+                    
+                    if use_attr:
+                        if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: 
+                            prop_row.prop(getattr(md.properties.inputs, geomod_get_identifier(md, prop_id)), "attribute_name", text="")
+                            attr_prop_name = f"{geomod_get_identifier(md, prop_id)}"
+                        else:
                             attr_prop_name = f'["{prop_id}_attribute_name"]'
                             prop_row.prop(md, attr_prop_name, text="")
-                            op = prop_row.operator("object.ml_geometry_nodes_attribute_search",
-                                                text="", icon='VIEWZOOM')
-                            op.property_name = attr_prop_name
-                        else:
-                            col = prop_row.column()
-                            # Use a space as a label for boolean checkboxes to make alignment work.
-                            text = ""
-                            if input_type == 'BOOLEAN':
-                                text = " "
-                            col.prop(md, f'["{prop_id}"]', text=text)
 
-                        op = row.operator("object.geometry_nodes_input_attribute_toggle", text="", icon='SPREADSHEET')
-                        op.input_name = prop_id
-                        op.modifier_name = md.name
-                        
+                        op = prop_row.operator("object.ml_geometry_nodes_attribute_search",
+                                            text="", icon='VIEWZOOM')
+                        op.property_name = attr_prop_name
                     else:
                         col = prop_row.column()
+                        # Use a space as a label for boolean checkboxes to make alignment work.
+                        text = ""
+                        if input_type == 'BOOLEAN':
+                            text = " "
+                        if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: 
+                            col.prop(getattr(md.properties.inputs, geomod_get_identifier(md, prop_id)), "value", text="")
+                        else:
+                            col.prop(md, f'["{prop_id}"]', text="")
+
+                    op = row.operator("object.geometry_nodes_input_attribute_toggle", text="", icon='SPREADSHEET')
+                    op.input_name = prop_id
+                    op.modifier_name = md.name
+                    
+                else:
+                    col = prop_row.column()
+                    if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: 
+                        col.prop(getattr(md.properties.inputs, geomod_get_identifier(md, prop_id)), "value", text="")
+                    else:
                         col.prop(md, f'["{prop_id}"]', text="")
-                        row.label(text="", icon='BLANK1')
-                layout.separator(factor=0.5)
+                    row.label(text="", icon='BLANK1')
+            layout.separator(factor=0.5)
         
         def get_node_panels(tree):
             return [item for item in tree.interface.items_tree if item.item_type == 'PANEL']
@@ -2230,10 +2279,14 @@ class DATA_PT_modifiers:
                     is_panel_toggle = False
                     panel_name = all_panel_list[panel_id].name
                     if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.0: # new is_panel_toggle property
-                        if info_per_input[0]["is_panel_toggle"]:
-                            header.alignment = 'LEFT'
-                            header.prop(md, f'["{str(info_per_input[0]["prop_id"])}"]', text="")
-                            is_panel_toggle = True
+                        if info_per_input:
+                            if info_per_input[0]["is_panel_toggle"]:
+                                header.alignment = 'LEFT'
+                                if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: 
+                                    header.prop(getattr(md.properties.inputs, geomod_get_identifier(md, info_per_input[0]["prop_id"])), "value", text="")
+                                else:
+                                    header.prop(md, f'["{str(info_per_input[0]["prop_id"])}"]', text="")
+                                is_panel_toggle = True
                     header.label(text=panel_name)
                     panel_open = bool(panel)
                    
@@ -2253,7 +2306,7 @@ class DATA_PT_modifiers:
                                 if i == 0 and is_panel_toggle:
                                     info_per_input.pop(0)
                                 else:
-                                    get_socket_prop_id(info_per_input.pop(0))
+                                    get_socket_prop_id(info_per_input.pop(0), panel=True)
                         removed_sockets.append(num_sockets_in_panel)
                     else:
                         num_sockets_in_panel = sum(1 for item in node_group.interface.items_tree if item.item_type == 'SOCKET' and item.parent == all_panel_list[panel_id])
@@ -2281,17 +2334,23 @@ class DATA_PT_modifiers:
 
         def output_prop_names(output_prop_ids):
             for prop_id, name in zip(output_prop_ids, valid_node_outputs_names):
-                        split = layout.split(factor=split_factor)
-                        split.label(text=name + ":")
-                        row = split.row(align=True)
-                        row.prop(md, f'["{prop_id}"]', text="")
-                        op = row.operator("object.ml_geometry_nodes_attribute_search", text="",
-                                        icon='VIEWZOOM')
-                        op.property_name = f'["{prop_id}"]'
-                        layout.separator(factor=0.5)
+                split = layout.split(factor=split_factor)
+                split.label(text=name + ":")
+                row = split.row(align=True)
+                if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2:
+                    row.prop(md.properties.outputs, prop_id, text="")
+                else:
+                    row.prop(md, f'["{prop_id}"]', text="")
+                op = row.operator("object.ml_geometry_nodes_attribute_search", text="",
+                                icon='VIEWZOOM')
+                op.property_name = f'["{prop_id}"]'
+                layout.separator(factor=0.5)
         
         def get_outputs_prop_id():
-            socket_prop_ids = [prop_id for prop_id in md.keys()]
+            if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: # new is_input_used function 
+                socket_prop_ids = [prop_id for prop_id in md.properties.outputs.keys()]
+            else:
+                socket_prop_ids = [prop_id for prop_id in md.keys()]
 
             # Keep track of socket names to identify duplicates, this is a hacky way to keep track if it is an output or not since the socket output/input is not stored in the prop_id name anymore
             socket_names = set()
@@ -2405,8 +2464,10 @@ class DATA_PT_modifiers:
                             icon = 'ERROR'
                         elif warning.type == 'ERROR':
                             icon = 'CANCEL'
-
-                        layout.label(text=warning.message, icon=icon)
+                        row = layout.row(align=True)
+                        row.alignment = 'LEFT'
+                        row.label(text="")
+                        row.label(text=warning.message, icon=icon)
     
     def draw_edit_mesh(self, layout, ob, md):
         row = layout.row()
@@ -2436,5 +2497,8 @@ class DATA_PT_modifiers:
                 self._nodes_4_0_outputs(layout, ob, md, split_factor)
     
     def NODES(self, layout, ob, md):
-        self._nodes_4_0(layout, ob, md)
+        # try:
+            self._nodes_4_0(layout, ob, md)
+        # except Exception as e:
+        #     print(f"{e}")
 

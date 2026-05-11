@@ -1,7 +1,8 @@
 from bpy.props import *
 from bpy.types import Operator
-
+import bpy
 from ..utils import get_ml_active_object
+BLENDER_VERSION_MAJOR_POINT_MINOR = float(bpy.app.version_string[0:4].strip("."))
 
 
 def attr_or_vertex_group_name_enum_items(self, context):
@@ -35,8 +36,15 @@ class OBJECT_OT_ml_geometry_nodes_attribute_search(Operator):
     def execute(self, context):
         ob = get_ml_active_object()
         active_mod = ob.modifiers[ob.ml_modifier_active_index]
-        setattr(active_mod, self.property_name, self.attr_or_vertex_group_name)
+        if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: 
+            from ...modules.ui.properties_data_modifier import geomod_get_identifier
+            print(geomod_get_identifier(active_mod, self.property_name))
+            setattr(getattr(active_mod.properties.inputs, geomod_get_identifier(active_mod, self.property_name)), "attribute_name", self.attr_or_vertex_group_name)
+        else:
+            setattr(active_mod, self.property_name, self.attr_or_vertex_group_name)
 
+        # refresh UI
+        context.area.tag_redraw()
         return {'FINISHED'}
 
     def invoke(self, context, event):

@@ -1,4 +1,4 @@
-import bpy
+import bpy, os
 from bpy.types import Panel
 
 from .modifiers_ui import modifiers_ui_with_list, modifiers_ui_with_stack
@@ -6,19 +6,38 @@ from .ui_common import pin_object_button
 from .vertex_groups_ui import vertex_groups_ui
 from .attributes_ui import attributes_ui
 from ..utils import get_ml_active_object, object_type_has_modifiers
+from ..icons import get_icons, get_icon_folder_path
 from ... import __package__ as base_package
-
 
 class BasePanel:
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = "Modifier List"
 
+from bpy.utils import previews
+# hack to get in the npanel icon for now! Cases errors on reload of addon though, but it works for now. TODO: Find better solution
+def get_icon(name):
+    # === Load new icons ===
+    pcoll = previews.new()
+
+    icons_dir = get_icon_folder_path()
+    icons_dir_files = os.listdir(icons_dir)
+
+    all_icon_files = [icon for icon in icons_dir_files if icon.endswith(".png")]
+    all_icon_names = [icon[0:-4] for icon in all_icon_files]
+    all_icon_files_and_names = zip(all_icon_names, all_icon_files)
+
+    for icon_name, icon_file in all_icon_files_and_names:
+        icon = pcoll.load(icon_name, os.path.join(icons_dir, icon_file), 'IMAGE')
+        hacky_icon_fix = str(icon.icon_pixels)
+    return pcoll[name].icon_id
+
 
 class VIEW3D_PT_ml_modifiers(Panel, BasePanel):
     # A leading space in the label, so there's separation between it
     # and the pin button
     bl_label = " Modifiers"
+    bl_icon_value = get_icon("MODIFIER")
 
     @classmethod
     def poll(cls, context):

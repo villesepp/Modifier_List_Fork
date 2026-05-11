@@ -836,7 +836,6 @@ def register():
     read_prefs(prefs_file)
     skip_writing_prefs = False
 
-
 def unregister():
     # === Write preferences into a json ===
     write_prefs()
