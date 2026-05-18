@@ -30,15 +30,14 @@ Some parts in here have been altered / will be altered.
 import bpy
 from bpy.app.translations import pgettext_iface as iface_
 
-
+NONE_DRAWABLE_SOCKETS = {'NodeSocketGeometry', 'NodeSocketClosure', 'NodeSocketBundle', 'NodeSocketMatrix'}
 BLENDER_VERSION_MAJOR_POINT_MINOR = float(bpy.app.version_string[0:4].strip("."))
-def geomod_get_identifier(modifier, identifier_name): 
-    for item in modifier.node_group.interface.items_tree:
-        if item.identifier == identifier_name:
-            # print(f"Found identifier for {identifier_name}: {item}")
-            return item.identifier
-    # print("failed to get identifier for param: " + identifier_name)
-    return None
+
+def geomod_get_identifier(identifier_name, modifier=None, sockets=None): 
+    if not sockets:
+        sockets = modifier.node_group.interface.items_tree
+    return sockets.get(identifier_name).identifier
+  
 
 class DATA_PT_modifiers:
 
@@ -146,11 +145,12 @@ class DATA_PT_modifiers:
         layout.label(text="Limit Method:")
         layout.row().prop(md, "limit_method", expand=True)
         if md.limit_method == 'WEIGHT':
-            # if app version is 4.3 or higher, use the new attribute property
             if BLENDER_VERSION_MAJOR_POINT_MINOR >= 4.3:
-                layout.prop(md, "edge_weight")
-            else:
-                pass
+                if md.affect == 'VERTICES':
+                    layout.prop(md, "vertex_weight")
+                else:
+                    layout.prop(md, "edge_weight")
+
         if md.limit_method == 'ANGLE':
             layout.prop(md, "angle_limit")
         elif md.limit_method == 'VGROUP':
@@ -2045,85 +2045,90 @@ class DATA_PT_modifiers:
         layout.prop(md, "use_smooth_shade")
 
     
-
-    def _nodes_4_0_inputs(self, layout, ob, md, split_facor):
+    def _geometry_nodes_inputs(self, layout, ob, md, split_facor):
+        # import time
+        # exec_time = time.time()
         node_group = md.node_group
 
         if not node_group:
             return
+        
+        info_per_input = []
 
-        # Find an input node because md.node_group.inputs contains
-        # NodeSocketInterfaces that don't have enough info. Currently,
-        # the only way to find out if an input accepts an attribute
-        # (i.e. is a field input) is to check the shape of a socket.
-        # Nodes have that info.
+        for node in node_group.interface.items_tree:
+            menu_expanded = False
+            is_panel_toggle = False
+            is_input_used = True   
+            is_input_visible = True   
+            default_closed = False
+            parent_prop_id = None
+ 
+            if node.item_type == "SOCKET":
+                prop_id = str(node.identifier)
+                if not node.in_out in {'INPUT'}:
+                    continue
+
+                if node.socket_type in NONE_DRAWABLE_SOCKETS:
+                    continue
+                if BLENDER_VERSION_MAJOR_POINT_MINOR >= 4.5: # new props
+                    is_panel_toggle = node.is_panel_toggle
+                if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: # new props
+                    parent_prop_id = node.parent.identifier if node.parent else None
+                    is_input_visible =  md.is_input_visible(prop_id)
+                    is_input_used =  md.is_input_used(prop_id)
+                    menu_expanded = node.menu_expanded 
+            else:
+                if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: # new props
+                    parent_prop_id = node.parent.identifier if node.parent else None
+                if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: # new props
+                    prop_id = str(node.identifier)
+                else:
+                    prop_id = str(str(node.as_pointer())) # while not perfect, should hopfully be stable enought
+
+                default_closed = node.default_closed 
+
+                # TODO: add panel paranet for socket and paranet for the panelse and index depth here instead, opens up for future optimzations
+
+            if prop_id[-1].isdigit():
+                info_per_input.append(
+                    {
+                        "name": node.name,
+                        "prop_id": prop_id,
+                        "item_type": node.item_type, 
+                        "hide_in_modifier": node.hide_in_modifier if node.item_type == "SOCKET" else False,
+                        "menu_expanded": menu_expanded,
+                        "is_panel_toggle": is_panel_toggle,
+                        "is_input_used": is_input_used,
+                        "is_input_visible": is_input_visible,
+                        "parent": node.parent.name if node.parent.name else None,
+                        "parent_prop_id": parent_prop_id,
+                        "default_closed": default_closed,
+
+                    }
+                )
+        # print("Execution time: ", time.time() - exec_time)
+        
+        nodes = []
         input_node = next((node for node in node_group.nodes if node.type == 'GROUP_INPUT'),
                           None)
-
+        
         if not input_node:
             return
-
-        info_per_input = []
         
-        # Skip the last output because it's a placeholder.
-        for node_output in input_node.outputs[:-1]:
-            if node_output.type in {'GEOMETRY', 'CLOSURE', 'BUNDLE', 'MATRIX'}: # not shown in UI, no supported props
-                continue
+        for node_output in input_node.outputs:
+            if node_output.type not in {'GEOMETRY', 'CLOSURE', 'BUNDLE', 'MATRIX'}:
+                nodes.append(node_output)
 
-            info_per_input.append(
-                {
-                    "name": node_output.name,
-                    "type": node_output.type,
-                    "accepts_attribute": node_output.display_shape in {'DIAMOND', 'DIAMOND_DOT'},
-                }
-            )
-
-        if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: # new is_input_used function 
-            input_prop_ids = [prop_id for prop_id in md.properties.inputs.keys()]
-            # remove first prop since its palceholder
-            input_prop_ids = input_prop_ids[1:]
-        else:
-            input_prop_ids = [prop_id for prop_id in md.keys()
-                            if (prop_id[-1].isdigit())]
-            
-        for i, prop_id in enumerate(input_prop_ids[:len(info_per_input)]):
-            info_per_input[i]["prop_id"] = prop_id
-
-        def get_inputs_is_input_used(node_tree):
-            inputs_is_input_used = [md.is_input_used(prop_id) for prop_id in input_prop_ids
-                        if prop_id[-1].isdigit()]
-                        
-            for i, is_used in enumerate(inputs_is_input_used):
-                if i < len(info_per_input):
-                    info_per_input[i]["is_input_used"] = is_used
-
-        if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: # new is_input_used function 
-            get_inputs_is_input_used(node_group)
-
-        def get_inputs_hide_in_modifier(node_tree):
-            inputs_hide_in_modifier = [item.hide_in_modifier for item in node_tree.interface.items_tree
-                                       if item.item_type == 'SOCKET'
-                                       if item.in_out in {'INPUT'}
-                                       if item.socket_type != 'NodeSocketGeometry']
-                                       
-            for i, hide_in_mod in enumerate(inputs_hide_in_modifier):
-                if i < len(info_per_input):
-                    info_per_input[i]["hide_in_modifier"] = hide_in_mod 
-                    
-        def get_inputs_is_panel_toggle(node_tree):
-            inputs_is_panel_toggle = [item.is_panel_toggle for item in node_tree.interface.items_tree
-                                       if item.item_type == 'SOCKET'
-                                       if item.in_out in {'INPUT'}
-                                       if item.socket_type != 'NodeSocketGeometry']
-                                       
-            for i, hide_in_mod in enumerate(inputs_is_panel_toggle):
-                if i < len(info_per_input):
-                    info_per_input[i]["is_panel_toggle"] = hide_in_mod
-
-        get_inputs_hide_in_modifier(node_group)
-        if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.0: # new is_panel_toggle property
-            get_inputs_is_panel_toggle(node_group)
-
+        socket_id = 0
+        for i, item in enumerate(info_per_input):
+            if item["item_type"] == "SOCKET":
+                info_per_input[i]["type"] = nodes[socket_id].type
+                if BLENDER_VERSION_MAJOR_POINT_MINOR <= 5.1: # old props, errors out in blende 5.0??
+                    info_per_input[i]["accepts_attribute"] = nodes[socket_id].display_shape in {'DIAMOND', 'DIAMOND_DOT'} 
+                else: # 5.2+
+                    info_per_input[i]["accepts_attribute"] = nodes[socket_id].display_shape not in {'LINE'} # wont be 100% accuret since socket can be dynamic, post bug report
+                socket_id +=1 
+    
         datablock_input_info_per_type = {
             "COLLECTION": {"data_collection": "collections", "icon": "OUTLINER_COLLECTION"},
             "IMAGE": {"data_collection": "images", "icon": "IMAGE"},
@@ -2132,25 +2137,28 @@ class DATA_PT_modifiers:
             "TEXTURE": {"data_collection": "textures", "icon": "TEXTURE"},
         }
 
-        def get_socket_prop_id(input_info, panel=False):
+        def draw_socket_prop_id(input_info, panel=False, sockets=None):
             # if 'type' in input_info and input_info['type'] == 'MATRIX':  # matrix sockets are not supported y in Blender and will be skipped, should be handeld better since currently it will hide one other input
             #     return
             if "prop_id" not in input_info: # needed to avoid error when the next socket after matrix socket is skipped
                 return
             prop_id = input_info["prop_id"]
             input_type = input_info["type"]
-
+            
             if input_info["hide_in_modifier"]:
                 return
-            
-            split = layout.split(factor=split_facor)
+            # split = layout.split(factor=split_facor)
 
             name = input_info["name"]
-            if panel:
-                name = "             " + name # add spaces to make it look like it's part of the panel above it
-            split.label(text=name + ":")
+            # if panel:
+            #     name = "             " + name # add spaces to make it look like it's part of the panel above it
+            # # if input_info["type"] == 'MENU':
+            # #     name = ""
+            # split.label(text=name)
 
-            row = split.row(align=True)
+            # row = split.row(align=True)
+            row = layout.row(align=True)
+            row.use_property_split = True
 
             if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: # handle is_input_used
                 if not input_info["is_input_used"]:
@@ -2161,13 +2169,13 @@ class DATA_PT_modifiers:
             if input_type in datablock_input_info_per_type.keys():
                 datablock_input_info = datablock_input_info_per_type[input_type]
                 if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: 
-                    prop_row.prop_search(getattr(md.properties.inputs, geomod_get_identifier(md, prop_id)), "value", bpy.data,
+                    prop_row.prop_search(getattr(md.properties.inputs, geomod_get_identifier(prop_id, sockets=sockets)), "value", bpy.data,
                                         datablock_input_info["data_collection"],
-                                        text="", icon=datablock_input_info["icon"])
+                                        text=name, icon=datablock_input_info["icon"])
 
                     # if datablock_input_info["icon"] == "IMAGE":
                     #     # if no image in prop, show new and open buttons
-                    #     if not getattr(md.properties.inputs, geomod_get_identifier(md, prop_id)).value:
+                    #     if not getattr(md.properties.inputs, geomod_get_identifier(prop_id, sockets=sockets)).value:
                     #         prop_row.operator("image.new", text="New", icon='ADD')
                     #         prop_row.operator("image.open", text="Open", icon='FILE_FOLDER')
                     #     else:
@@ -2179,145 +2187,142 @@ class DATA_PT_modifiers:
                 else:
                     prop_row.prop_search(md, f'["{prop_id}"]', bpy.data,
                                         datablock_input_info["data_collection"],
-                                        text="", icon=datablock_input_info["icon"])
+                                        text=name, icon=datablock_input_info["icon"])
                 row.label(text="", icon='BLANK1')
 
             else:
                 if input_info["accepts_attribute"] and input_info["type"] != 'MENU': # menus should never show the attribute buttons # fixes: https://github.com/Dangry98/Modifier_List_Fork/issues/44
                     if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: 
-                        use_attr = getattr(md.properties.inputs, geomod_get_identifier(md, prop_id)).type != "VALUE"                
-
+                        use_attr = getattr(md.properties.inputs, geomod_get_identifier(prop_id, sockets=sockets)).type != "VALUE"                
                     else:
                         use_attr = md.get(f"{prop_id}_use_attribute", 0) == 1
                     
                     if use_attr:
                         if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: 
-                            prop_row.prop(getattr(md.properties.inputs, geomod_get_identifier(md, prop_id)), "attribute_name", text="")
-                            attr_prop_name = f"{geomod_get_identifier(md, prop_id)}"
+                            prop_row.prop(getattr(md.properties.inputs, geomod_get_identifier(prop_id, sockets=sockets)), "attribute_name", text=name)
+                            attr_prop_name = f"{geomod_get_identifier(prop_id, sockets=sockets)}"
                         else:
                             attr_prop_name = f'["{prop_id}_attribute_name"]'
-                            prop_row.prop(md, attr_prop_name, text="")
+                            prop_row.prop(md, attr_prop_name, text=name)
 
                         op = prop_row.operator("object.ml_geometry_nodes_attribute_search",
                                             text="", icon='VIEWZOOM')
                         op.property_name = attr_prop_name
                     else:
-                        col = prop_row.column()
-                        # Use a space as a label for boolean checkboxes to make alignment work.
-                        text = ""
-                        if input_type == 'BOOLEAN':
-                            text = " "
-                        if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: 
-                            col.prop(getattr(md.properties.inputs, geomod_get_identifier(md, prop_id)), "value", text="")
-                        else:
-                            col.prop(md, f'["{prop_id}"]', text="")
 
-                    op = row.operator("object.geometry_nodes_input_attribute_toggle", text="", icon='SPREADSHEET')
+                        if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: 
+                            prop_row.prop(getattr(md.properties.inputs, geomod_get_identifier(prop_id, sockets=sockets)), "value", text=name)
+                        else:
+                            prop_row.prop(md, f'["{prop_id}"]', text=name)
+
+                    op = prop_row.operator("object.geometry_nodes_input_attribute_toggle", text="", icon='SPREADSHEET')
                     op.input_name = prop_id
                     op.modifier_name = md.name
                     
                 else:
-                    col = prop_row.column()
+
                     if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: 
-                        col.prop(getattr(md.properties.inputs, geomod_get_identifier(md, prop_id)), "value", text="")
+                        if input_info["type"] == 'MENU':
+                            expand=input_info["menu_expanded"]
+                            prop_row.prop(getattr(md.properties.inputs, geomod_get_identifier(prop_id, sockets=sockets)), "value", text=name, expand=expand)
+                        else:
+                            prop_row.prop(getattr(md.properties.inputs, geomod_get_identifier(prop_id, sockets=sockets)), "value", text=name)
                     else:
-                        col.prop(md, f'["{prop_id}"]', text="")
-                    row.label(text="", icon='BLANK1')
+                        col = prop_row.column()
+                        col.prop(md, f'["{prop_id}"]', text=name)
+                    prop_row.label(text="", icon='BLANK1') # matches blenders UI, but gives less space and more cluttered
             layout.separator(factor=0.5)
         
         def get_node_panels(tree):
             return [item for item in tree.interface.items_tree if item.item_type == 'PANEL']
 
-        def get_socket_and_parent_name(tree):
-            return [item.parent.name if item.parent.name else 'no_panel' for item in tree.interface.items_tree if item.item_type == 'SOCKET' and item.in_out == 'INPUT' and item.socket_type != 'NodeSocketGeometry']
-
-        def tree_socket_or_panel_order(node_tree):
-            socket_panel_list = []
-            for item in node_tree.interface.items_tree:
-                if item.item_type == 'SOCKET' and item.in_out == 'INPUT' and item.socket_type != 'NodeSocketGeometry':
-                    socket_panel_list.append('SOCKET')
-                elif item.item_type == 'PANEL':
-                    socket_panel_list.append('PANEL')
-            return socket_panel_list
-
-        def is_panel_default_closed(node_tree):
-            return any(item.default_closed for item in node_tree.interface.items_tree if item.item_type == 'PANEL')
-
         all_panel_list = get_node_panels(node_group)
         amount_of_panels = len(all_panel_list)
-        socket_has_panel_and_panel_name = get_socket_and_parent_name(node_group)
-        socket_panel_list = tree_socket_or_panel_order(node_group)
         panel_id = 0
-        removed_sockets = [] 
-        current_item = -1
+        open_panelse_prop_ids = []
+
+        sockets = md.node_group.interface.items_tree
 
         if BLENDER_VERSION_MAJOR_POINT_MINOR > 4.0:
-            for item in socket_panel_list:
-                socket_unused = False
-                if item == 'SOCKET':
-                    current_item += 1
-    
+            for i, item in enumerate(info_per_input): # we should loop over info_per_input isntead, saving the panels in the info_per_input as well! 
+                is_socket = item["item_type"] == 'SOCKET' 
+                is_panel =  item["item_type"] == 'PANEL' 
+
                 if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: # handle is_input_used
-                    if info_per_input:
-                        if info_per_input[0]:
-                            if "prop_id" in info_per_input[0]:
-                                visable = md.is_input_visible(info_per_input[0]["prop_id"])
-                                if not md.is_input_visible(info_per_input[0]["prop_id"]):
-                                    info_per_input.pop(0)
-                                    if item == 'PANEL': 
-                                        panel_id = (panel_id + 1) % amount_of_panels
-                                    continue
+                    if not item["is_input_visible"]:
+                        if is_panel: 
+                            panel_id = (panel_id + 1) % amount_of_panels
+                        continue
 
-                if item == 'SOCKET' and socket_has_panel_and_panel_name[current_item] == 'no_panel':
-                    if info_per_input:
-                        get_socket_prop_id(info_per_input.pop(0))
+                if is_socket and not item["parent"] and not item["is_panel_toggle"]:
+                    draw_socket_prop_id(item, sockets=sockets)
                         
-                elif item == 'PANEL':    
-                    # layout = layout.box()
-                    header, panel = layout.panel(idname=str(all_panel_list[panel_id]), default_closed=is_panel_default_closed(node_group))
+                elif is_panel:    
+                    if item["parent_prop_id"]:
+                        if not str(item["parent_prop_id"]) in open_panelse_prop_ids:
+                            panel_id = (panel_id + 1) % amount_of_panels
+                            continue
 
+                    # layout = layout.box()
+                    num_sockets_in_panel = sum(1 for item in node_group.interface.items_tree if item.item_type == 'SOCKET' and item.in_out == 'INPUT' and not item.socket_type in NONE_DRAWABLE_SOCKETS and item.parent == all_panel_list[panel_id])
+                    if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: # handle should_draw_panel
+                        should_draw_panel = False
+                        for r in range(num_sockets_in_panel):
+                            test_socket_id = i+r+1
+                            test = info_per_input[test_socket_id]
+                            if test["item_type"] == "SOCKET":
+                                if md.is_input_visible(test["prop_id"]): # for some reson, the dic is not up to date!
+                                    should_draw_panel = True
+                                    break
+                        if not should_draw_panel:
+                            continue
+
+                    header, panel = layout.panel(idname=item["prop_id"], default_closed=item["default_closed"])
                     is_panel_toggle = False
-                    panel_name = all_panel_list[panel_id].name
-                    if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.0: # new is_panel_toggle property
-                        if info_per_input:
-                            if info_per_input[0]["is_panel_toggle"]:
+                    
+                    panel_name = item["name"]
+                    if BLENDER_VERSION_MAJOR_POINT_MINOR >= 4.5: # new is_panel_toggle property
+                        if num_sockets_in_panel:
+                            test_panel_toggle = info_per_input[i +1]
+                            if test_panel_toggle["is_panel_toggle"]:
                                 header.alignment = 'LEFT'
+                                if not test_panel_toggle["is_input_used"]:
+                                     header.active = False
                                 if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: 
-                                    header.prop(getattr(md.properties.inputs, geomod_get_identifier(md, info_per_input[0]["prop_id"])), "value", text="")
+                                    header.prop(getattr(md.properties.inputs, geomod_get_identifier(test_panel_toggle["prop_id"], sockets=sockets)), "value", text="")
                                 else:
-                                    header.prop(md, f'["{str(info_per_input[0]["prop_id"])}"]', text="")
+                                    header.prop(md, f'["{str(test_panel_toggle["prop_id"])}"]', text="")
                                 is_panel_toggle = True
                     header.label(text=panel_name)
                     panel_open = bool(panel)
-                   
-                    # if is_panel_toggle:
-                    #     is_panel_toggle
-                    # upde mutli res and subdiv mod
-                    
                     if panel_open:
-                        num_sockets_in_panel = sum(1 for item in node_group.interface.items_tree if item.item_type == 'SOCKET' and item.parent == all_panel_list[panel_id])
-                        for i in range(num_sockets_in_panel):
-                            if info_per_input:
+                        open_panelse_prop_ids.append(str(item["prop_id"]))
+                   
+                    if panel_open: # todo add panel hiarcy, close panel if parent panel is closed
+                        for r in range(num_sockets_in_panel):
+                            if r == 0 and is_panel_toggle: # Skip the first socket if it's a panel toggle to avoid duplicates
+                                continue
+
+                            socket_id = i+r+1
+                            socket_item = info_per_input[socket_id] 
+                            if socket_item["item_type"] == "SOCKET":
                                 # if panel name in socket name, remove that part from the socket name to make it more clear like in deafult blender modifier panel
-                                if panel_name in info_per_input[0]["name"]:
-                                    info_per_input[0]["name"] = info_per_input[0]["name"].replace(panel_name, "").strip()
+                                if panel_name in socket_item["name"] and panel_name != socket_item["name"]:
+                                    socket_item["name"] = socket_item["name"].replace(panel_name, "").strip()
 
-                                # Skip the first socket if it's a panel toggle to avoid duplicates
-                                if i == 0 and is_panel_toggle:
-                                    info_per_input.pop(0)
-                                else:
-                                    get_socket_prop_id(info_per_input.pop(0), panel=True)
-                        removed_sockets.append(num_sockets_in_panel)
-                    else:
-                        num_sockets_in_panel = sum(1 for item in node_group.interface.items_tree if item.item_type == 'SOCKET' and item.parent == all_panel_list[panel_id])
-                        info_per_input = info_per_input[num_sockets_in_panel:]
+                                if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: # handle is_input_visible
+                                    if not md.is_input_visible(socket_item["prop_id"]): # for some reson, the is_input_visible is not working properly in the dic??
+                                        continue
 
+                                draw_socket_prop_id(info_per_input[socket_id], panel=True, sockets=sockets)
                     panel_id = (panel_id + 1) % amount_of_panels
 
         else:
-            for item in socket_panel_list:
-                if info_per_input:
-                    get_socket_prop_id(info_per_input.pop(0))
+            # for item in socket_panel_list:
+            #     if info_per_input:
+            for item in info_per_input:
+                if item["item_type"] == 'SOCKET': 
+                    draw_socket_prop_id(item, sockets=sockets)
 
     def _nodes_4_0_outputs(self, layout, ob, md, split_factor):
         if not md.node_group:
@@ -2333,25 +2338,33 @@ class DATA_PT_modifiers:
         valid_node_outputs_names = get_valid_outputs_names(md.node_group)
 
         def output_prop_names(output_prop_ids):
+            sockets = md.node_group.interface.items_tree
+
             for prop_id, name in zip(output_prop_ids, valid_node_outputs_names):
-                split = layout.split(factor=split_factor)
-                split.label(text=name + ":")
-                row = split.row(align=True)
-                if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2:
-                    row.prop(md.properties.outputs, prop_id, text="")
+                # split = layout.split(factor=split_factor)
+                row = layout.row(align=True)
+                row.use_property_split = True
+                name = name # add spaces to make it look like it's part of the panel above it
+                if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: 
+                    row.prop(getattr(md.properties.outputs, geomod_get_identifier(prop_id, sockets=sockets)), "attribute_name", text=name)
+                    attr_prop_name = prop_id
                 else:
-                    row.prop(md, f'["{prop_id}"]', text="")
+                    attr_prop_name = f'["{prop_id}"]'
+                    row.prop(md, f'["{prop_id}"]', text=name)
                 op = row.operator("object.ml_geometry_nodes_attribute_search", text="",
                                 icon='VIEWZOOM')
-                op.property_name = f'["{prop_id}"]'
+                op.property_name = attr_prop_name
+                op.is_output = True
                 layout.separator(factor=0.5)
         
         def get_outputs_prop_id():
             if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: # new is_input_used function 
-                socket_prop_ids = [prop_id for prop_id in md.properties.outputs.keys()]
+                # socket_prop_ids = [prop_id for prop_id in md.properties.outputs.keys()]
+                socket_prop_ids = [output.identifier for output in md.node_group.interface.items_tree
+                if output.item_type == 'SOCKET' 
+                if output.in_out == 'OUTPUT' and output.socket_type in valid_output_types]
             else:
                 socket_prop_ids = [prop_id for prop_id in md.keys()]
-
             # Keep track of socket names to identify duplicates, this is a hacky way to keep track if it is an output or not since the socket output/input is not stored in the prop_id name anymore
             socket_names = set()
             duplicate_socket_names = set()
@@ -2387,25 +2400,23 @@ class DATA_PT_modifiers:
                 else:
                     output_prop_names(output_prop_ids)           
 
-            def bake_directory():
+            def draw_bake_directory():
                 get_active_modifier = ob.modifiers.get(md.name)
-                
+                layout.use_property_split = True
+                row = layout.row(align=True)
                 if not hasattr(get_active_modifier, "bake_directory"):
                     get_active_modifier.bake_directory = bpy.props.StringProperty(name="Bake Directory", default="")
                 
                 if BLENDER_VERSION_MAJOR_POINT_MINOR >= 4.3: # new target property
-                    row = layout.row(align = True)
-                    row.label(text="Bake Target")
-                    row.prop(get_active_modifier, "bake_target", text="")
+                    row.prop(get_active_modifier, "bake_target",text="Bake Target")
                     
                 row = layout.row(align = True)
-                row.label(text="Bake Path")
-                row.prop(get_active_modifier, "bake_directory", text="")
+                row.prop(get_active_modifier, "bake_directory", text="Bake Path")
                 bake_node_amounts = (len(md.bakes))
               
                 for i in range(bake_node_amounts):
                     row = layout.row(align = True)
-                    label = "Bake Node: " + str(i+1) 
+                    label = "                           Bake Node: " + str(i+1) 
                     row.label(text=label)
                     row.operator("object.ml_modifier_bake").bake_id = i
 
@@ -2435,7 +2446,7 @@ class DATA_PT_modifiers:
                         # header, panel_bake = layout.panel(idname="Bake", default_closed=True)
                         # header.label(text="Bake")
                         # if panel_bake:
-                        bake_directory()
+                        draw_bake_directory()
                         
                         # have not figured out how to get the used attributes
 
@@ -2486,19 +2497,23 @@ class DATA_PT_modifiers:
         if md.type == 'NODES':
             if md.node_group:
                 if not "Edit Mesh" in md.node_group.name:
-                    self._nodes_4_0_inputs(layout, ob, md, split_factor)
+                    self._geometry_nodes_inputs(layout, ob, md, split_factor)
                     self.draw_warning(layout, ob, md)
                     self._nodes_4_0_outputs(layout, ob, md, split_factor)
                 else:
                     self.draw_edit_mesh(layout, ob, md)
             else:
-                self._nodes_4_0_inputs(layout, ob, md, split_factor)
+                self._geometry_nodes_inputs(layout, ob, md, split_factor)
                 self.draw_warning(layout, ob, md)
                 self._nodes_4_0_outputs(layout, ob, md, split_factor)
     
     def NODES(self, layout, ob, md):
-        # try:
+            # import time
+            # exec_time = time.time()
+        # try:Fim
             self._nodes_4_0(layout, ob, md)
+            # print("Execution time: ", time.time() - exec_time)
+
         # except Exception as e:
         #     print(f"{e}")
 

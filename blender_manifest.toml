@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "Modifier_List_Fork"
-version = "1.9.88"
+version = "2.0.0"
 name = "Modifier List"
 tagline = "Enhanced Modifier UI/Features, now with Edit Mesh Modifier"
 maintainer = "Antti Tikka, Draise, Dan-Gry"

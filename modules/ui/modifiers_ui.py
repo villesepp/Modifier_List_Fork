@@ -729,12 +729,11 @@ def time_to_string(t):
             return str(round(t/3600, 0)) + "h"
 
 
-def _get_all_modifier_times():
+def _get_all_modifier_times(depsgraph):
     global prev_ms_times
 
     obj = get_ml_active_object()
 
-    depsgraph = bpy.context.view_layer.depsgraph
     ob_eval = obj.evaluated_get(depsgraph)
 
     if bpy.context.scene.total_time:
@@ -987,8 +986,9 @@ class ModifierExtrasBase:
         layout.separator()
 
         layout.label(text="Syncronize Modifiers Between Instances:")
-        layout.operator("object.ml_sync_active_modifier_between_instances", text="Active Only")
-        layout.operator("object.ml_sync_all_modifiers_between_instances", text="All")
+        row = layout.row()
+        row.operator("object.ml_sync_active_modifier_between_instances", text="Active Only")
+        row.operator("object.ml_sync_all_modifiers_between_instances", text="All")
 
         layout.separator()
 
@@ -1064,7 +1064,7 @@ def modifiers_ui_with_list(context, layout, num_of_rows=False, use_in_popup=Fals
 
     # === Total Timing Text ===
     if bpy.context.scene.total_time:
-        col.label(text=_get_all_modifier_times())
+        col.label(text=_get_all_modifier_times(bpy.context.view_layer.depsgraph))
 
 
     # === Modifier list ===
@@ -1167,10 +1167,11 @@ def modifiers_ui_with_list(context, layout, num_of_rows=False, use_in_popup=Fals
                                     row.prop(mod, f'["{"Socket_3"}"]', text="As Instance")
 
             #warn if the object has a object constraint modifier and switch it to stack instead of list to avoide crash and bugs
-            if ob.constraints:
-                col.label(text="Unsuported Constraint on Object! Switch to Stack to avoid bugs!", icon='ERROR')
-                prefs = bpy.context.preferences.addons[base_package].preferences
-                col.row().prop(prefs, "properties_editor_style", expand=True)
+            if BLENDER_VERSION_MAJOR_POINT_MINOR <= 5.1: 
+                if ob.constraints:
+                    col.label(text="Unsuported Constraint on Object! Switch to Stack to avoid bugs!", icon='ERROR')
+                    prefs = bpy.context.preferences.addons[base_package].preferences
+                    col.row().prop(prefs, "properties_editor_style", expand=True)
         else:
             row = layout.row()
 

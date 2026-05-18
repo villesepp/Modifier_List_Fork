@@ -397,6 +397,7 @@
 import bpy
 import bmesh
 from ... import __package__ as base_package
+BLENDER_VERSION_MAJOR_POINT_MINOR = float(bpy.app.version_string[0:4].strip("."))
 
 def edit_mesh_node_group():
     edit_mesh = bpy.data.node_groups.new(type = 'GeometryNodeTree', name = "Edit Mesh")
@@ -511,7 +512,10 @@ class EditmeshClear(bpy.types.Operator):
         obj = context.active_object
         active_mod_index = obj.ml_modifier_active_index
         active_mod = obj.modifiers[active_mod_index]
-        property_index = str(active_mod["Socket_2"])
+        if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: # new props
+            property_index = str(active_mod.properties.inputs.Socket_2.value)
+        else:
+            property_index = str(active_mod["Socket_2"])
 
         if obj and active_mod:
             if active_mod.type == 'NODES':
@@ -666,7 +670,10 @@ class EditmeshModifier(bpy.types.Operator):
             # add new node group to the modifier
             edit_mesh_modifier.node_group = bpy.data.node_groups['Edit Mesh']
             edit_mesh_modifier.show_group_selector = False
-            edit_mesh_modifier["Socket_2"] = index # we store a index of the number of the mesh data block
+            if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: # new props
+                edit_mesh_modifier.properties.inputs.Socket_2.value = index
+            else:
+                edit_mesh_modifier["Socket_2"] = index # we store a index of the number of the mesh data block
             edit_mesh_modifier.show_viewport = False
 
             if mod_is_visiable:

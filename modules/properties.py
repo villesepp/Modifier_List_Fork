@@ -337,11 +337,25 @@ def register():
 
 
 def unregister():
-    bpy.app.handlers.load_post.remove(on_file_load)
+    try:
+        bpy.app.handlers.load_post.remove(on_file_load)
+    except ValueError:
+        pass
+    
+    try:
+        del bpy.types.Object.ml_modifier_active_index
+    except AttributeError:
+        pass
 
-    del bpy.types.Object.ml_modifier_active_index
-    del bpy.types.WindowManager.modifier_list
-    del bpy.types.Scene.modifier_list
+    try:
+        del bpy.types.WindowManager.modifier_list
+    except AttributeError:
+        pass
+
+    try:
+        del bpy.types.Scene.modifier_list
+    except AttributeError:
+        pass
 
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)

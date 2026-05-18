@@ -16,8 +16,15 @@ class BasePanel:
 
 from bpy.utils import previews
 # hack to get in the npanel icon for now! Cases errors on reload of addon though, but it works for now. TODO: Find better solution
+_preview_collections = {}
+
 def get_icon(name):
-    # === Load new icons ===
+    # === Remove the current icons and clear preview_collections ===
+    for pcoll in _preview_collections.values():
+        previews.remove(pcoll)
+
+    _preview_collections.clear()
+
     pcoll = previews.new()
 
     icons_dir = get_icon_folder_path()
@@ -30,8 +37,14 @@ def get_icon(name):
     for icon_name, icon_file in all_icon_files_and_names:
         icon = pcoll.load(icon_name, os.path.join(icons_dir, icon_file), 'IMAGE')
         hacky_icon_fix = str(icon.icon_pixels)
+    _preview_collections["main"] = pcoll
+    
     return pcoll[name].icon_id
 
+def unregister():
+    for pcoll in _preview_collections.values():
+        previews.remove(pcoll)
+    _preview_collections.clear()
 
 class VIEW3D_PT_ml_modifiers(Panel, BasePanel):
     # A leading space in the label, so there's separation between it
@@ -58,6 +71,10 @@ class VIEW3D_PT_ml_modifiers(Panel, BasePanel):
     def draw_header(self, context):
         layout = self.layout
         pin_object_button(context, layout)
+    def draw_header_preset(self, context):
+        layout = self.layout
+        layout.operator("preferences.addon_show", text="Prefs", icon='PREFERENCES', emboss=True).module = base_package
+
 
     def draw(self, context):
         layout = self.layout

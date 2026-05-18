@@ -410,32 +410,38 @@ def _set_lattice_points(lattice_object, lattice_dimensions):
 
 
 def _fit_lattice_to_selection(object, vertices, lattice_object):
-    ob_mat = object.matrix_world
-    ob_loc, ob_rot, ob_scale = ob_mat.decompose()
-    vert_locs = [Matrix.Diagonal(ob_scale) @ v.co for v in vertices]
-    avg_vert_loc = sum(vert_locs, Vector()) / len(vert_locs)
-    lat_origin = _calc_lattice_origin(vert_locs, avg_vert_loc)
+    verts = [object.matrix_world @ v.co for v in vertices]   
+    if not verts: return None
 
-    lattice_object.matrix_world = (Matrix.Translation(ob_loc) @ ob_rot.to_matrix().to_4x4() @
-                                   Matrix.Translation(lat_origin))
+    min_x, max_x, min_y, max_y, min_z, max_z = get_bounding_box(verts)
 
-    dims = _calc_lattice_dimensions(vert_locs, avg_vert_loc)
-    # Avoid setting dimensions of a lattice to 0; it causes problems.
-    ensured_dims = [d if d > 0 else 0.1 for d in dims]
+    lattice_object.location = (min_x + max_x) / 2, (min_y + max_y) / 2, (min_z + max_z) / 2
+    lattice_object.scale = (max_x - min_x), (max_y - min_y), (max_z - min_z)
+    lattice_object.scale = lattice_object.scale * 1.01
 
-    lattice_object.dimensions = ensured_dims
 
-    _set_lattice_points(lattice_object, dims)
-
+    #if the lattice is completely flat, only have 1 subdivision on z axis
+    if lattice_object.scale.z == 0:
+        lattice_object.data.points_w = 1
+        lattice_object.scale.z = 1.0     
 
 def _fit_lattice_to_object(object, lattice_object):
-    ob_mat = object.matrix_world
-    ob_loc, ob_rot, _ = ob_mat.decompose()
+    #get bounding box of all selected mesh objects and create a lattice object from it
+    all_bounds = []
+    all_bounds = [object.matrix_world @ Vector(corner) for corner in get_ml_active_object().bound_box]
+    
+    if not all_bounds: return {"CANCELLED"}
 
-    local_bbox_center = sum((Vector(b) for b in object.bound_box), Vector()) / 8
+    x_min = min(c[0] for c in all_bounds)
+    x_max = max(c[0] for c in all_bounds)
+    y_min = min(c[1] for c in all_bounds)
+    y_max = max(c[1] for c in all_bounds)
+    z_min = min(c[2] for c in all_bounds)
+    z_max = max(c[2] for c in all_bounds)
 
-    lattice_object.matrix_world = (Matrix.Translation(ob_loc) @ ob_rot.to_matrix().to_4x4() @
-                                   Matrix.Translation(local_bbox_center))
+    lattice_object.location = (x_min + x_max) / 2, (y_min + y_max) / 2, (z_min + z_max) / 2
+    lattice_object.scale = (x_max - x_min), (y_max - y_min), (z_max - z_min)
+    lattice_object.scale = lattice_object.scale * 1.01
 
     dims = object.dimensions
     # Avoid setting dimensions of a lattice to 0; it causes problems.
@@ -453,7 +459,7 @@ def is_edit_mesh_modifier(mod):
                 is_edit_mesh_modifies = True
     return is_edit_mesh_modifies
 
-def _position_lattice_gizmo_object(gizmo_object):
+def _set_lattice_vertex_groups_and_pos(gizmo_object):
     """Position a lattice gizmo object"""
     ob = get_ml_active_object()
     mesh = ob.data
@@ -495,6 +501,14 @@ def _position_lattice_gizmo_object(gizmo_object):
     else:
         _fit_lattice_to_object(ob, gizmo_object)
 
+def get_bounding_box(verts):
+    min_x = min([v.x for v in verts])
+    max_x = max([v.x for v in verts])
+    min_y = min([v.y for v in verts])
+    max_y = max([v.y for v in verts])
+    min_z = min([v.z for v in verts])
+    max_z = max([v.z for v in verts])
+    return min_x, max_x, min_y, max_y, min_z, max_z
 
 def _create_lattice_gizmo_object(self, context, modifier):
     """Create a gizmo (lattice) object"""
@@ -503,8 +517,6 @@ def _create_lattice_gizmo_object(self, context, modifier):
 
     ml_col = _get_ml_collection(context)
     ml_col.objects.link(gizmo_ob)
-
-    _position_lattice_gizmo_object(gizmo_ob)
 
     return gizmo_ob
 
@@ -535,12 +547,13 @@ def assign_gizmo_object_to_modifier(self, context, modifier, placement='OBJECT',
                     gizmo_ob.parent = ob
                     gizmo_ob.matrix_parent_inverse = ob.matrix_world.inverted()
                 break
-
         return
 
     # If modifier is not UV Project, continue normally
     if mod.type == 'LATTICE':
         gizmo_ob = _create_lattice_gizmo_object(self, context, modifier)
+        _set_lattice_vertex_groups_and_pos(gizmo_ob)
+
     else:
         gizmo_ob = _create_gizmo_object(self, context, modifier, placement, ob)
 
@@ -565,8 +578,8 @@ def assign_gizmo_object_to_modifier(self, context, modifier, placement='OBJECT',
     # if it isn't explicitly reset here.
     if mod.type == 'HOOK' and ob.mode == 'EDIT':
         bpy.ops.object.hook_reset(modifier=mod.name)
-
-    if mod.type == 'LATTICE':
+    
+    if mod.type == 'LATTICE' and gizmo_ob:
         if context.area.type == 'PROPERTIES':
             bpy.ops.object.lattice_toggle_editmode_prop_editor()
         else:

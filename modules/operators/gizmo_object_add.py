@@ -25,6 +25,7 @@ class OBJECT_OT_ml_gizmo_object_add(Operator):
         ('OBJECT', 'Object Origin', ''),
     ),
     options={'HIDDEN', 'SKIP_SAVE'})
+    individual: BoolProperty(default=False, options={'SKIP_SAVE'})
 
     def execute(self, context):
         self.placement = "OBJECT" if self.placement == 'NONE' else self.placement
@@ -38,6 +39,8 @@ class OBJECT_OT_ml_gizmo_object_add(Operator):
                 self.placement = 'CURSOR'
             elif event.ctrl:
                 self.placement = 'WORLD_ORIGIN'
+            # elif event.alt:
+            #     self.individual = True
             else:
                 self.placement = 'OBJECT'
 

@@ -32,14 +32,17 @@ class OBJECT_OT_ml_geometry_nodes_attribute_search(Operator):
 
     attr_or_vertex_group_name: EnumProperty(items=attr_or_vertex_group_name_enum_items)
     property_name: StringProperty()
+    is_output: BoolProperty(options={"SKIP_SAVE"}, default=False)
 
     def execute(self, context):
         ob = get_ml_active_object()
         active_mod = ob.modifiers[ob.ml_modifier_active_index]
         if BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2: 
             from ...modules.ui.properties_data_modifier import geomod_get_identifier
-            print(geomod_get_identifier(active_mod, self.property_name))
-            setattr(getattr(active_mod.properties.inputs, geomod_get_identifier(active_mod, self.property_name)), "attribute_name", self.attr_or_vertex_group_name)
+            if self.is_output:
+                setattr(getattr(active_mod.properties.outputs, geomod_get_identifier(self.property_name, modifier=active_mod)), "attribute_name", self.attr_or_vertex_group_name)
+            else:
+                setattr(getattr(active_mod.properties.inputs, geomod_get_identifier(self.property_name, modifier=active_mod)), "attribute_name", self.attr_or_vertex_group_name)
         else:
             setattr(active_mod, self.property_name, self.attr_or_vertex_group_name)
 
