@@ -58,4 +58,4 @@ class OBJECT_OT_ml_add_modifier_from_search(Operator):
 
     def invoke(self, context, event):
         context.window_manager.invoke_search_popup(self)
-        return {'CANCELLED'}
+        return {'RUNNING_MODAL'}
