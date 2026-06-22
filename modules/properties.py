@@ -3,6 +3,7 @@ from bpy.app.handlers import persistent
 from bpy.props import *
 from bpy.types import PropertyGroup
 from . import modifier_categories
+from .utils import get_ml_active_object
 from pathlib import Path
 
 assets_dic = []
@@ -322,6 +323,29 @@ def on_file_load(dummy):
     set_volume_modifier_collection_items()
 
 
+def modifier_search_items(self, context, edit_text):
+    ob = get_ml_active_object()
+    if ob is None:
+        return ()
+
+    collection_by_object_type = {
+        'MESH': "mesh_modifiers",
+        'CURVE': "curve_text_modifiers",
+        'FONT': "curve_text_modifiers",
+        'CURVES': "curves_modifiers",
+        'LATTICE': "lattice_modifiers",
+        'POINTCLOUD': "pointcloud_modifiers",
+        'SURFACE': "surface_modifiers",
+        'VOLUME': "volume_modifiers",
+    }
+    collection_name = collection_by_object_type.get(ob.type)
+    if collection_name is None:
+        return ()
+
+    ml_props = context.window_manager.modifier_list
+    return getattr(ml_props, collection_name).keys()
+
+
 def add_modifier(self, context):
     # Add modifier
     ml_props = bpy.context.window_manager.modifier_list
@@ -446,6 +470,8 @@ class ML_WindowManagerProperties(PropertyGroup):
     modifier_to_add_from_search: StringProperty(
         name="Search for Modifier",
         update=add_modifier,
+        search=modifier_search_items,
+        search_options={'SORT'},
         description="Search for a modifier and add it to the stack")
     all_modifiers: CollectionProperty(type=AllModifiersCollection)
     mesh_modifiers: CollectionProperty(type=MeshModifiersCollection)
