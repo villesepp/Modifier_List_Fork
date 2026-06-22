@@ -66,7 +66,7 @@ def _favourite_modifier_buttons(layout):
                 row.label(text="")
 
 
-def _modifier_search_and_menu(layout, object, new_menu=False):
+def _modifier_search_and_menu(layout, object, new_menu=False, activate_search=False):
     """Creates the modifier search and menu row.
 
     Returns a sub row which contains the menu so that the modifier
@@ -75,34 +75,28 @@ def _modifier_search_and_menu(layout, object, new_menu=False):
     ob = object
     ml_props = bpy.context.window_manager.modifier_list
 
+    if ob.type == "EMPTY" and BLENDER_VERSION_MAJOR_POINT_MINOR >= 5.2:
+        row = layout.row()
+        row.operator("wm.call_menu", text="Add Modifier", icon="ADD").name = "OBJECT_MT_modifier_add"
+        return row
+    
     if new_menu:
         row = layout.split(factor=0.5, align=True)
     else:
         row = layout.split(factor=0.59)
-    row.enabled = ob.library is None or ob.override_library is not None
 
-    if ob.type == 'MESH':
-        # row.operator("wm.search_single_menu", text="Search for Modifier", icon='VIEWZOOM').menu_idname = "OBJECT_MT_modifier_add"
-        row.prop_search(ml_props, "modifier_to_add_from_search", ml_props, "mesh_modifiers",
-                        text="", icon='VIEWZOOM')
-    elif ob.type in {'CURVE', 'FONT'}:
-        row.prop_search(ml_props, "modifier_to_add_from_search", ml_props, "curve_text_modifiers",
-                        text="", icon='VIEWZOOM')
-    elif ob.type == 'CURVES':
-        row.prop_search(ml_props, "modifier_to_add_from_search", ml_props, "curves_modifiers",
-                        text="", icon='VIEWZOOM')
-    elif ob.type == 'LATTICE':
-        row.prop_search(ml_props, "modifier_to_add_from_search", ml_props, "lattice_modifiers",
-                        text="", icon='VIEWZOOM')
-    elif ob.type == 'POINTCLOUD':
-        row.prop_search(ml_props, "modifier_to_add_from_search", ml_props, "pointcloud_modifiers",
-                        text="", icon='VIEWZOOM')
-    elif ob.type == 'SURFACE':
-        row.prop_search(ml_props, "modifier_to_add_from_search", ml_props, "surface_modifiers",
-                        text="", icon='VIEWZOOM')
-    elif ob.type == 'VOLUME':
-        row.prop_search(ml_props, "modifier_to_add_from_search", ml_props, "volume_modifiers",
-                        text="", icon='VIEWZOOM')
+    row.enabled = ob.library is None or ob.override_library is not None
+    search_row = row.row()
+    if activate_search:
+        search_row.activate_init = True
+
+    search_row.prop(
+        ml_props,
+        "modifier_to_add_from_search",
+        text="",
+        icon='VIEWZOOM',
+        placeholder="Search for Modifier",
+    )
 
     sub = row.row(align=new_menu)
     sub.menu("OBJECT_MT_ml_add_modifier_menu")
@@ -688,8 +682,8 @@ def draw_time_props(self, context):
         row = layout.row()
         row.prop(bpy.context.scene, "total_time", text="Show Total Time")
 
-def time_to_string(t):
-    if bpy.context.scene.compact_timing == False:
+def time_to_string(t, context):
+    if bpy.context.scene.compact_timing == False and context.area.type != "VIEW_3D":
         # If modifier is disabled, show 0.0 ms
         if t == 0.0015:
             return f'0.0 ms'
@@ -729,7 +723,7 @@ def time_to_string(t):
             return str(round(t/3600, 0)) + "h"
 
 
-def _get_all_modifier_times(depsgraph):
+def _get_all_modifier_times(depsgraph, context):
     global prev_ms_times
 
     obj = get_ml_active_object()
@@ -744,7 +738,7 @@ def _get_all_modifier_times(depsgraph):
             times += [t]
             total += t
         total_text = 'Total:'
-        total_time = total_text + ' ' + time_to_string(sum(times))
+        total_time = total_text + ' ' + time_to_string(sum(times), context)
         return total_time
     
     
@@ -775,18 +769,38 @@ def _get_modifier_times(mod): # we should not call it per modifier, but only onc
     return ms_times
     
 class OBJECT_UL_modifier_list(UIList):
+    def filter_items(self, context, data, propname):
+        ordered = []
+        filter_flags = []
+        items = getattr(data, propname)
+        prefs = bpy.context.preferences.addons[base_package].preferences
+
+        if self.filter_name:
+            helper_funcs = bpy.types.UI_UL_list
+            filter_flags = helper_funcs.filter_items_by_name(self.filter_name, self.bitflag_filter_item, items, "name",
+                                                          reverse=False)
+
+        if prefs.reverse_list:
+            ordered = [index for index, item in enumerate(items)]
+            ordered.reverse()
+        return filter_flags, ordered
+    
+    def draw_filter(self, context, layout): 
+        """UI code for the filtering/sorting/search area.""" 
+        layout.prop(self, 'filter_name', text='', icon='VIEWZOOM') 
+ 
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         global list_of_frozen_modifiers
         prefs = bpy.context.preferences.addons[base_package].preferences
-        show_times = bpy.context.scene.show_timings
+        show_times = bpy.context.scene.show_timings and context.region.width > 320
 
         mod = item
         over_100ms = False
         if show_times:
-                text_modifier_left = _get_modifier_times(mod)
-                if text_modifier_left > 0.1:
-                    over_100ms = True
-                text_modifier_left = time_to_string(text_modifier_left)
+            text_modifier_left = _get_modifier_times(mod)
+            if text_modifier_left > 0.1:
+                over_100ms = True
+            text_modifier_left = time_to_string(text_modifier_left, context)
         else:
             text_modifier_left = ""
 
@@ -1059,19 +1073,18 @@ def modifiers_ui_with_list(context, layout, num_of_rows=False, use_in_popup=Fals
     # # === Modifier search and menu ===
     if prefs.show_search_and_menu_bar:
         col = layout.column()
-        _modifier_search_and_menu(col, ob, new_menu)
+        _modifier_search_and_menu(col, ob, new_menu, activate_search=use_in_popup)
 
 
     # === Total Timing Text ===
     if bpy.context.scene.total_time:
-        col.label(text=_get_all_modifier_times(bpy.context.view_layer.depsgraph))
+        col.label(text=_get_all_modifier_times(bpy.context.view_layer.depsgraph, context))
 
 
-    # === Modifier list ===
+    # === Modifier list === 
     layout.template_list("OBJECT_UL_modifier_list", "", ob, "modifiers",
                          ob, "ml_modifier_active_index", rows=num_of_rows,
-                         sort_reverse=prefs.reverse_list)
-
+                        )
     # When sub.scale_x is 1.5 and the area/region is narrow, the buttons
     # don't align properly, so some manual work is needed.
     if use_in_popup:

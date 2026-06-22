@@ -1,6 +1,6 @@
 import bpy
 from bpy.props import *
-from bpy.types import Operator
+from bpy.types import Operator, Panel
 
 from .modifiers_ui import modifiers_ui_with_list, modifiers_ui_with_stack
 from .ui_common import pin_object_button
@@ -25,10 +25,15 @@ class VIEW3D_OT_ml_modifier_popup(Operator):
         TABS_WIDTH = 26
         self.overall_width = self.panel_width + TABS_WIDTH
 
-        if prefs.use_props_dialog:
-            return context.window_manager.invoke_props_dialog(self, width=self.overall_width)
-
-        return context.window_manager.invoke_popup(self, width=self.overall_width)
+        ui_scale = context.preferences.system.ui_scale
+        VIEW3D_PT_ml_modifier_popup.bl_ui_units_x = max(
+            1, round(self.overall_width / (20 * ui_scale)))
+        bpy.ops.wm.call_panel(
+            'INVOKE_DEFAULT',
+            name=VIEW3D_PT_ml_modifier_popup.bl_idname,
+            keep_open=True,
+        )
+        return {'FINISHED'}
 
     def check(self, context):
         return True
@@ -85,3 +90,17 @@ class VIEW3D_OT_ml_modifier_popup(Operator):
             col.separator(factor=3)
 
             pin_object_button(context, col)
+
+class VIEW3D_PT_ml_modifier_popup(Panel):
+    bl_idname = "VIEW3D_PT_ml_modifier_popup"
+    bl_label = "Modifier Popup"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'WINDOW'
+    bl_ui_units_x = 16
+
+    def draw(self, context):
+        prefs = bpy.context.preferences.addons[base_package].preferences
+        self.panel_width = prefs.popup_width
+        self.overall_width = self.panel_width + 26
+        VIEW3D_OT_ml_modifier_popup.draw(self, context)
+
